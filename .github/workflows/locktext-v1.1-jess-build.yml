@@ -31,7 +31,12 @@ jobs:
       - name: Install exact Android SDK packages
         run: |
           yes | sdkmanager --licenses >/dev/null 2>&1 || true
-          sdkmanager "platforms;android-33" "build-tools;33.0.2" "platform-tools"
+          sdkmanager \
+            "platforms;android-33" \
+            "build-tools;33.0.2" \
+            "platform-tools" \
+            "emulator" \
+            "system-images;android-33;google_apis;x86_64"
 
       - name: Set up Gradle 8.13
         uses: gradle/actions/setup-gradle@v4
@@ -62,6 +67,49 @@ jobs:
           "$ANDROID_HOME/build-tools/33.0.2/aapt" dump permissions "app/build/outputs/apk/debug/LockText-v1.1-Jess.apk" | tee /tmp/locktext-permissions.txt
           ! grep -q "android.permission.INTERNET" /tmp/locktext-permissions.txt
           sha256sum "app/build/outputs/apk/debug/LockText-v1.1-Jess.apk"
+
+      - name: Install and launch runtime smoke test
+        run: |
+          set -euo pipefail
+          APK="app/build/outputs/apk/debug/LockText-v1.1-Jess.apk"
+          echo "no" | avdmanager create avd \
+            --force \
+            --name locktext-ci \
+            --package "system-images;android-33;google_apis;x86_64" \
+            --device "pixel_5"
+
+          nohup emulator \
+            -avd locktext-ci \
+            -no-window \
+            -no-audio \
+            -no-boot-anim \
+            -no-snapshot \
+            -gpu swiftshader_indirect \
+            >/tmp/locktext-emulator.log 2>&1 &
+
+          adb wait-for-device
+          timeout 240 bash -c 'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = "1" ]; do sleep 5; done'
+          adb shell input keyevent 82 || true
+
+          adb install -r "$APK"
+          adb logcat -c
+          adb shell am start -W -n com.falsetech.locktext/.MainActivity | tee /tmp/locktext-start.txt
+          grep -q "Status: ok" /tmp/locktext-start.txt
+          sleep 5
+
+          PID="$(adb shell pidof com.falsetech.locktext | tr -d '\r')"
+          test -n "$PID"
+          adb shell dumpsys activity activities | grep -q "com.falsetech.locktext/.MainActivity"
+
+          if adb logcat -d --pid="$PID" | grep -q "FATAL EXCEPTION"; then
+            echo "LockText crashed during launch smoke test"
+            adb logcat -d --pid="$PID"
+            exit 1
+          fi
+
+          adb shell am force-stop com.falsetech.locktext
+          adb uninstall com.falsetech.locktext
+          echo "RUNTIME_SMOKE_TEST=PASS"
 
       - name: Upload deployable APK
         uses: actions/upload-artifact@v4
