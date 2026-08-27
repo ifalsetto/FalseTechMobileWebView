@@ -74,6 +74,9 @@ jobs:
         run: |
           set -euo pipefail
           APK="app/build/outputs/apk/debug/LockText-v1.1-Jess.apk"
+          export ANDROID_USER_HOME="$RUNNER_TEMP/android-user"
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/android-avd"
+          mkdir -p "$ANDROID_USER_HOME" "$ANDROID_AVD_HOME"
 
           if [ -e /dev/kvm ]; then
             sudo chmod 666 /dev/kvm
@@ -84,6 +87,9 @@ jobs:
             --name locktext-ci \
             --package "system-images;android-33;google_apis;x86_64" \
             --device "pixel_5"
+
+          "$ANDROID_HOME/emulator/emulator" -list-avds | tee /tmp/locktext-avds.txt
+          grep -qx "locktext-ci" /tmp/locktext-avds.txt
 
           nohup "$ANDROID_HOME/emulator/emulator" \
             -avd locktext-ci \
@@ -125,7 +131,7 @@ jobs:
 
           PID="$(adb shell pidof com.falsetech.locktext | tr -d '\r')"
           test -n "$PID"
-          adb shell dumpsys activity activities | grep -q "com.falsetech.locktext/.MainActivity"
+          adb shell dumpsys activity activities | grep -E "com\.falsetech\.locktext(/|\.)com\.falsetech\.locktext\.MainActivity|com\.falsetech\.locktext/.MainActivity|com\.falsetech\.locktext\.MainActivity"
 
           if adb logcat -d --pid="$PID" | grep -q "FATAL EXCEPTION"; then
             echo "LockText crashed during launch smoke test"
