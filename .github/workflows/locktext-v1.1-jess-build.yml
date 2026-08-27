@@ -11,6 +11,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: locktext
@@ -69,9 +70,15 @@ jobs:
           sha256sum "app/build/outputs/apk/debug/LockText-v1.1-Jess.apk"
 
       - name: Install and launch runtime smoke test
+        timeout-minutes: 6
         run: |
           set -euo pipefail
           APK="app/build/outputs/apk/debug/LockText-v1.1-Jess.apk"
+
+          if [ -e /dev/kvm ]; then
+            sudo chmod 666 /dev/kvm
+          fi
+
           echo "no" | avdmanager create avd \
             --force \
             --name locktext-ci \
@@ -85,12 +92,31 @@ jobs:
             -no-boot-anim \
             -no-snapshot \
             -gpu swiftshader_indirect \
+            -cores 2 \
+            -memory 2048 \
             >/tmp/locktext-emulator.log 2>&1 &
+          EMULATOR_PID=$!
 
-          adb wait-for-device
-          timeout 240 bash -c 'until [ "$(adb shell getprop sys.boot_completed | tr -d "\r")" = "1" ]; do sleep 5; done'
+          cleanup() {
+            adb emu kill >/dev/null 2>&1 || true
+            kill "$EMULATOR_PID" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          if ! timeout 120 adb wait-for-device; then
+            echo "ADB did not see the emulator"
+            cat /tmp/locktext-emulator.log || true
+            exit 1
+          fi
+
+          if ! timeout 180 bash -c 'until [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d "\r")" = "1" ]; do sleep 5; done'; then
+            echo "Android emulator did not finish booting"
+            cat /tmp/locktext-emulator.log || true
+            adb shell getprop || true
+            exit 1
+          fi
+
           adb shell input keyevent 82 || true
-
           adb install -r "$APK"
           adb logcat -c
           adb shell am start -W -n com.falsetech.locktext/.MainActivity | tee /tmp/locktext-start.txt
