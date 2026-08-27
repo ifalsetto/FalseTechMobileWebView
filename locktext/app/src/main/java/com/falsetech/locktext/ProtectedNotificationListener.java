@@ -1,6 +1,7 @@
 package com.falsetech.locktext;
 
 import android.Manifest;
+import android.annotation.TargetApi;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -8,6 +9,7 @@ import android.app.PendingIntent;
 import android.app.Person;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Parcelable;
 import android.service.notification.NotificationListenerService;
@@ -72,22 +74,28 @@ public class ProtectedNotificationListener extends NotificationListenerService {
         }
 
         Parcelable[] rawMessages = extras.getParcelableArray(Notification.EXTRA_MESSAGES);
-        if (rawMessages != null) {
-            try {
-                List<Notification.MessagingStyle.Message> messages = Notification.MessagingStyle.Message.getMessagesFromBundleArray(rawMessages);
-                for (Notification.MessagingStyle.Message message : messages) {
-                    Person sender = message.getSenderPerson();
-                    if (sender != null) {
-                        add(result, sender.getName());
-                        if (sender.getUri() != null) add(result, sender.getUri());
-                    } else {
-                        add(result, message.getSender());
-                    }
-                }
-            } catch (Exception ignored) {
-            }
+        if (rawMessages != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            addMessageSendersApi30(result, rawMessages);
         }
         return result;
+    }
+
+    @TargetApi(Build.VERSION_CODES.R)
+    private void addMessageSendersApi30(List<String> result, Parcelable[] rawMessages) {
+        try {
+            List<Notification.MessagingStyle.Message> messages =
+                    Notification.MessagingStyle.Message.getMessagesFromBundleArray(rawMessages);
+            for (Notification.MessagingStyle.Message message : messages) {
+                Person sender = message.getSenderPerson();
+                if (sender != null) {
+                    add(result, sender.getName());
+                    if (sender.getUri() != null) add(result, sender.getUri());
+                } else {
+                    add(result, message.getSender());
+                }
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     private void postProtectedReplacement(Notification original, ProtectedTarget target) {
@@ -129,7 +137,7 @@ public class ProtectedNotificationListener extends NotificationListenerService {
                 .setOnlyAlertOnce(false);
         if (content != null) builder.setContentIntent(content);
 
-        if (android.os.Build.VERSION.SDK_INT >= 33
+        if (Build.VERSION.SDK_INT >= 33
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             return;
         }
