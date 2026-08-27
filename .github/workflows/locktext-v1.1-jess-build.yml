@@ -85,7 +85,7 @@ jobs:
             --package "system-images;android-33;google_apis;x86_64" \
             --device "pixel_5"
 
-          nohup emulator \
+          nohup "$ANDROID_HOME/emulator/emulator" \
             -avd locktext-ci \
             -no-window \
             -no-audio \
